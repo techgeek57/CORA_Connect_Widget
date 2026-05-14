@@ -25,6 +25,77 @@
     const API_ENDPOINT = 'https://x75hhzcm3d.execute-api.us-gov-east-1.amazonaws.com/prod/query';
     const FEEDBACK_ENDPOINT = 'https://x75hhzcm3d.execute-api.us-gov-east-1.amazonaws.com/prod/feedback';
 
+    function FeedbackModal({ isOpen, onClose, onSubmit }) {
+      const [selectedReason, setSelectedReason] = useState('');
+      const [comment, setComment] = useState('');
+
+      const reasons = [
+        "Didn't answer my question",
+        "Information was incorrect",
+        "Response was incomplete",
+        "Sources weren't helpful",
+        "Other"
+      ];
+
+      const handleSubmit = () => {
+        onSubmit(selectedReason, comment);
+        setSelectedReason('');
+        setComment('');
+        onClose();
+      };
+
+      if (!isOpen) return null;
+
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4">Help us improve</h3>
+            <p className="text-sm text-gray-600 mb-4">What went wrong with this response?</p>
+            
+            <div className="space-y-2 mb-4">
+              {reasons.map((reason) => (
+                <label key={reason} className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="reason"
+                    value={reason}
+                    checked={selectedReason === reason}
+                    onChange={(e) => setSelectedReason(e.target.value)}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm">{reason}</span>
+                </label>
+              ))}
+            </div>
+
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Additional comments (optional)"
+              className="w-full border border-gray-300 rounded p-2 text-sm mb-4"
+              rows="3"
+            />
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!selectedReason}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                Submit Feedback
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function ChatWidget() {
       const [messages, setMessages] = useState([
         {
@@ -36,6 +107,8 @@
       ]);
       const [input, setInput] = useState('');
       const [loading, setLoading] = useState(false);
+      const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+      const [selectedMessageIndex, setSelectedMessageIndex] = useState(null);
       const messagesEndRef = useRef(null);
 
       const scrollToBottom = () => {
@@ -88,20 +161,25 @@
         }
       };
 
-      const submitFeedback = async (messageIndex, sentiment) => {
+      const submitFeedback = async (messageIndex, sentiment, reason = '', comment = '') => {
         const message = messages[messageIndex];
         
         try {
+          const feedbackData = {
+            query: message.query,
+            response: message.content,
+            sentiment: sentiment,
+            sources: message.sources,
+            response_time_ms: message.responseTime
+          };
+
+          if (reason) feedbackData.feedback_reason = reason;
+          if (comment) feedbackData.feedback_comment = comment;
+
           await fetch(FEEDBACK_ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              query: message.query,
-              response: message.content,
-              sentiment: sentiment,
-              sources: message.sources,
-              response_time_ms: message.responseTime
-            })
+            body: JSON.stringify(feedbackData)
           });
 
           // Mark feedback as given
@@ -113,6 +191,15 @@
         }
       };
 
+      const handleNegativeFeedback = (messageIndex) => {
+        setSelectedMessageIndex(messageIndex);
+        setFeedbackModalOpen(true);
+      };
+
+      const handleModalSubmit = (reason, comment) => {
+        submitFeedback(selectedMessageIndex, 'negative', reason, comment);
+      };
+
       const handleKeyPress = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
@@ -122,6 +209,12 @@
 
       return (
         <div className="flex flex-col h-screen bg-gray-50">
+          <FeedbackModal 
+            isOpen={feedbackModalOpen}
+            onClose={() => setFeedbackModalOpen(false)}
+            onSubmit={handleModalSubmit}
+          />
+
           {/* Header */}
           <div className="bg-blue-600 text-white p-4 shadow-lg">
             <div className="max-w-4xl mx-auto">
@@ -170,7 +263,7 @@
                           👍 Helpful
                         </button>
                         <button
-                          onClick={() => submitFeedback(idx, 'negative')}
+                          onClick={() => handleNegativeFeedback(idx)}
                           disabled={msg.feedbackGiven}
                           className={`px-3 py-1 rounded text-sm transition-colors ${
                             msg.selectedFeedback === 'negative'
